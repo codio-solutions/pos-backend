@@ -1,0 +1,10 @@
+Add this block to config/services.php, alongside the 'website' entry
+already added in Phase 1:
+
+    'frontend' => [
+        'url' => env('FRONTEND_URL', 'http://localhost:3000'),
+    ],
+
+And add to .env:
+
+    FRONTEND_URL=http://localhost:3000
