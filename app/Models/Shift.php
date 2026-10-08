@@ -30,6 +30,6 @@ class Shift extends Model
             return null; // still open — frontend computes live duration client-side
         }
 
-        return $this->check_out_at->diffInSeconds($this->check_in_at);
+        return (int) abs($this->check_in_at->diffInSeconds($this->check_out_at));
     }
 }
