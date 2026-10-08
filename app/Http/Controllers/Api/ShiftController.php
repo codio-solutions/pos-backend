@@ -19,7 +19,11 @@ class ShiftController extends Controller
             ->latest('check_in_at')
             ->first();
 
-        return response()->json($shift);
+        return response()->json($shift)->withHeaders([
+            'Cache-Control' => 'private, no-store, no-cache, must-revalidate',
+            'CDN-Cache-Control' => 'no-store',
+            'Cloudflare-CDN-Cache-Control' => 'no-store',
+        ]);
     }
 
     public function checkIn(Request $request)
@@ -91,6 +95,10 @@ class ShiftController extends Controller
                     ? (int) round($totalSeconds / $completed->count())
                     : 0,
             ],
+        ])->withHeaders([
+            'Cache-Control' => 'private, no-store, no-cache, must-revalidate',
+            'CDN-Cache-Control' => 'no-store',
+            'Cloudflare-CDN-Cache-Control' => 'no-store',
         ]);
     }
 
