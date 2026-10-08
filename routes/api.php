@@ -39,6 +39,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Visits — employee submits from the field; admin monitors everyone's.
     Route::post('/visits', [VisitController::class, 'store']);
     Route::get('/visits/mine', [VisitController::class, 'mine']);
+    Route::get('/visits/{visit}/photos/{type}', [VisitController::class, 'photo'])
+        ->whereIn('type', ['doctor', 'building']);
 
     // Admin-only: POS core + workforce oversight. An employee (field rep)
     // token hitting any of these gets a 403 from the role middleware.

@@ -10,6 +10,7 @@ use App\Models\Visit;
 use App\Models\VisitOrderItem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class VisitController extends Controller
 {
@@ -133,5 +134,25 @@ class VisitController extends Controller
             ->paginate(25);
 
         return response()->json($visits);
+    }
+
+    public function photo(Request $request, Visit $visit, string $type)
+    {
+        abort_unless(
+            $request->user()->role === 'admin' || $visit->employee_id === $request->user()->id,
+            403
+        );
+
+        abort_unless(in_array($type, ['doctor', 'building'], true), 404);
+
+        $path = $type === 'doctor'
+            ? $visit->doctor_photo_path
+            : $visit->building_photo_path;
+
+        abort_unless($path && Storage::disk('public')->exists($path), 404, 'Visit photo not found.');
+
+        return Storage::disk('public')->response($path, null, [
+            'Cache-Control' => 'private, max-age=300',
+        ]);
     }
 }
