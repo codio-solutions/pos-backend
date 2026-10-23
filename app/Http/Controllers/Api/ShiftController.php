@@ -4,7 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Shift;
+use App\Models\User;
+use App\Support\Audit;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ShiftController extends Controller
 {
@@ -28,48 +32,54 @@ class ShiftController extends Controller
 
     public function checkIn(Request $request)
     {
-        $existing = Shift::where('employee_id', $request->user()->id)
-            ->whereNull('check_out_at')
-            ->exists();
+        return DB::transaction(function () use ($request) {
+            User::whereKey($request->user()->id)->lockForUpdate()->firstOrFail();
+            $existing = Shift::where('employee_id', $request->user()->id)
+                ->whereNull('check_out_at')
+                ->exists();
 
-        abort_if($existing, 422, 'You already have an open shift — check out first.');
+            abort_if($existing, 422, 'You already have an open shift — check out first.');
 
-        $data = $request->validate([
-            'lat' => 'nullable|numeric',
-            'lng' => 'nullable|numeric',
-        ]);
+            $data = $request->validate([
+                'lat' => 'nullable|numeric|between:-90,90',
+                'lng' => 'nullable|numeric|between:-180,180',
+            ]);
 
-        $shift = Shift::create([
-            'employee_id' => $request->user()->id,
-            'check_in_at' => now(),
-            'check_in_lat' => $data['lat'] ?? null,
-            'check_in_lng' => $data['lng'] ?? null,
-        ]);
+            $shift = Shift::create([
+                'employee_id' => $request->user()->id,
+                'check_in_at' => now(),
+                'check_in_lat' => $data['lat'] ?? null,
+                'check_in_lng' => $data['lng'] ?? null,
+            ]);
 
-        return response()->json($shift, 201);
+            return response()->json($shift, 201);
+        });
     }
 
     public function checkOut(Request $request)
     {
-        $shift = Shift::where('employee_id', $request->user()->id)
-            ->whereNull('check_out_at')
-            ->latest('check_in_at')
-            ->first();
+        return DB::transaction(function () use ($request) {
+            User::whereKey($request->user()->id)->lockForUpdate()->firstOrFail();
+            $shift = Shift::where('employee_id', $request->user()->id)
+                ->whereNull('check_out_at')
+                ->latest('check_in_at')
+                ->first();
 
-        abort_unless($shift, 422, 'No open shift to check out of.');
+            abort_unless($shift, 422, 'No open shift to check out of.');
 
-        $data = $request->validate([
-            'lat' => 'nullable|numeric',
-            'lng' => 'nullable|numeric',
-        ]);
+            $data = $request->validate([
+                'lat' => 'nullable|numeric|between:-90,90',
+                'lng' => 'nullable|numeric|between:-180,180',
+            ]);
 
-        $shift->update([
-            'check_out_at' => now(),
-            'check_out_lat' => $data['lat'] ?? null,
-            'check_out_lng' => $data['lng'] ?? null,
-        ]);
+            $shift->update([
+                'check_out_at' => now(),
+                'check_out_lat' => $data['lat'] ?? null,
+                'check_out_lng' => $data['lng'] ?? null,
+            ]);
 
-        return response()->json($shift);
+            return response()->json($shift);
+        });
     }
 
     /**
@@ -78,21 +88,28 @@ class ShiftController extends Controller
      */
     public function mine(Request $request)
     {
-        $shifts = Shift::where('employee_id', $request->user()->id)
-            ->latest('check_in_at')
-            ->limit(50)
-            ->get();
-
-        $completed = $shifts->whereNotNull('check_out_at');
-        $totalSeconds = $completed->sum('duration_seconds');
+        $request->validate(['from' => 'nullable|date_format:Y-m-d', 'to' => 'nullable|date_format:Y-m-d|after_or_equal:from']);
+        $query = Shift::where('employee_id', $request->user()->id)
+            ->when($request->from, fn ($q, $d) => $q->whereDate('check_in_at', '>=', $d))
+            ->when($request->to, fn ($q, $d) => $q->whereDate('check_in_at', '<=', $d));
+        $shifts = (clone $query)->latest('check_in_at')->paginate(25);
+        $totalSeconds = 0;
+        $completedCount = 0;
+        foreach ((clone $query)->whereNotNull('check_out_at')->cursor() as $completedShift) {
+            $totalSeconds += $completedShift->duration_seconds;
+            $completedCount++;
+        }
 
         return response()->json([
-            'shifts' => $shifts,
+            'shifts' => $shifts->items(),
+            'pagination' => ['current_page' => $shifts->currentPage(), 'last_page' => $shifts->lastPage(), 'total' => $shifts->total()],
+            'open_shift' => Shift::where('employee_id', $request->user()->id)->whereNull('check_out_at')->first(),
+            'period' => ['from' => $request->from, 'to' => $request->to],
             'stats' => [
-                'completed_count' => $completed->count(),
+                'completed_count' => $completedCount,
                 'total_seconds' => $totalSeconds,
-                'average_seconds' => $completed->count() > 0
-                    ? (int) round($totalSeconds / $completed->count())
+                'average_seconds' => $completedCount > 0
+                    ? (int) round($totalSeconds / $completedCount)
                     : 0,
             ],
         ])->withHeaders([
@@ -124,10 +141,19 @@ class ShiftController extends Controller
     public function close(Request $request, Shift $shift)
     {
         $data = $request->validate([
-            'check_out_at' => 'required|date|after:check_in_at',
+            'check_out_at' => 'required|date',
+            'reason' => 'required|string|max:255',
         ]);
 
-        $shift->update(['check_out_at' => $data['check_out_at']]);
+        DB::transaction(function () use ($shift, $data) {
+            $locked = Shift::whereKey($shift->id)->lockForUpdate()->firstOrFail();
+            abort_if($locked->check_out_at, 422, 'This shift is already closed.');
+            $end = Carbon::parse($data['check_out_at']);
+            abort_unless($end->greaterThan($locked->check_in_at) && $end->lessThanOrEqualTo(now()), 422, 'Checkout must be after check-in and not in the future.');
+            $locked->update(['check_out_at' => $end]);
+            Audit::record('shift.closed', $locked, $data);
+        });
+        $shift->refresh();
 
         return response()->json($shift);
     }

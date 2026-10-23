@@ -29,6 +29,7 @@ return [
     */
 
     'disks' => [
+        'visits' => ['driver' => 'local', 'root' => storage_path('app/visit-proof'), 'visibility' => 'private', 'throw' => true],
 
         'local' => [
             'driver' => 'local',

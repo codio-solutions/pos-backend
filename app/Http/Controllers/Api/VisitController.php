@@ -8,9 +8,11 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\Visit;
 use App\Models\VisitOrderItem;
+use App\Support\Money;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class VisitController extends Controller
 {
@@ -33,75 +35,91 @@ class VisitController extends Controller
         $data = $request->validate([
             'doctor_name' => 'required|string|max:255',
             'clinic_name' => 'required|string|max:255',
-            'doctor_phone' => 'required|string|max:50',
-            'doctor_email' => 'nullable|email',
-            'clinic_address' => 'required|string',
-            'notes' => 'nullable|string',
-            'lat' => 'nullable|numeric',
-            'lng' => 'nullable|numeric',
-            'items' => 'nullable|string', // JSON-encoded array, decoded below
+            'doctor_phone' => 'nullable|string|max:50',
+            'doctor_email' => 'nullable|email|max:255',
+            'clinic_address' => 'required|string|max:2000',
+            'notes' => 'nullable|string|max:10000',
+            'lat' => 'required|numeric|between:-90,90',
+            'lng' => 'required|numeric|between:-180,180',
+            'items' => 'nullable|string|max:50000', // JSON-encoded array, decoded below
             'doctor_photo' => 'required|image|max:5120',
             'building_photo' => 'required|image|max:5120',
         ]);
 
         $items = [];
-        if (!empty($data['items'])) {
+        if (! empty($data['items'])) {
             $decoded = json_decode($data['items'], true);
             abort_if(json_last_error() !== JSON_ERROR_NONE, 422, 'Invalid items payload.');
             $items = $decoded ?? [];
         }
 
-        $doctorPhotoPath = $request->file('doctor_photo')->store('visits', 'public');
-        $buildingPhotoPath = $request->file('building_photo')->store('visits', 'public');
+        validator(['items' => $items], [
+            'items' => 'array|max:100',
+            'items.*' => 'required|array:product_id,qty',
+            'items.*.product_id' => ['required', 'integer', Rule::exists('products', 'id')->where('is_active', true)],
+            'items.*.qty' => 'required|integer|min:1|max:1000000',
+        ])->validate();
+        $doctorPhotoPath = $buildingPhotoPath = null;
+        try {
+            $doctorPhotoPath = $request->file('doctor_photo')->store('visits', 'visits');
+            $buildingPhotoPath = $request->file('building_photo')->store('visits', 'visits');
 
-        $visit = DB::transaction(function () use ($data, $items, $doctorPhotoPath, $buildingPhotoPath, $request) {
-            $visit = Visit::create([
-                'employee_id' => $request->user()->id,
-                'doctor_name' => $data['doctor_name'],
-                'clinic_name' => $data['clinic_name'],
-                'doctor_phone' => $data['doctor_phone'],
-                'doctor_email' => $data['doctor_email'] ?? null,
-                'clinic_address' => $data['clinic_address'],
-                'notes' => $data['notes'] ?? null,
-                'lat' => $data['lat'] ?? null,
-                'lng' => $data['lng'] ?? null,
-                'doctor_photo_path' => $doctorPhotoPath,
-                'building_photo_path' => $buildingPhotoPath,
-            ]);
-
-            if (!empty($items)) {
-                $order = Order::create([
-                    'source' => 'visit',
-                    'status' => 'pending',
-                    'created_by' => $request->user()->id,
+            $visit = DB::transaction(function () use ($data, $items, $doctorPhotoPath, $buildingPhotoPath, $request) {
+                $visit = Visit::create([
+                    'employee_id' => $request->user()->id,
+                    'doctor_name' => $data['doctor_name'],
+                    'clinic_name' => $data['clinic_name'],
+                    'doctor_phone' => $data['doctor_phone'] ?? '',
+                    'doctor_email' => $data['doctor_email'] ?? null,
+                    'clinic_address' => $data['clinic_address'],
+                    'notes' => $data['notes'] ?? null,
+                    'lat' => $data['lat'] ?? null,
+                    'lng' => $data['lng'] ?? null,
+                    'doctor_photo_path' => $doctorPhotoPath,
+                    'building_photo_path' => $buildingPhotoPath,
                 ]);
 
-                foreach ($items as $item) {
-                    $product = Product::findOrFail($item['product_id']);
-
-                    VisitOrderItem::create([
-                        'visit_id' => $visit->id,
-                        'product_id' => $product->id,
-                        'qty' => $item['qty'],
+                if (! empty($items)) {
+                    $order = Order::create([
+                        'source' => 'visit',
+                        'status' => 'pending',
+                        'created_by' => $request->user()->id,
                     ]);
 
-                    OrderItem::create([
-                        'order_id' => $order->id,
-                        'product_id' => $product->id,
-                        'qty' => $item['qty'],
-                        'unit_price' => $product->trade_price,
-                        'line_total' => $item['qty'] * $product->trade_price,
-                    ]);
+                    foreach ($items as $item) {
+                        $product = Product::findOrFail($item['product_id']);
+
+                        VisitOrderItem::create([
+                            'visit_id' => $visit->id,
+                            'product_id' => $product->id,
+                            'qty' => $item['qty'],
+                        ]);
+
+                        OrderItem::create([
+                            'order_id' => $order->id,
+                            'product_id' => $product->id,
+                            'qty' => $item['qty'],
+                            'unit_price' => $product->trade_price,
+                            'line_total' => Money::multiply($product->trade_price, $item['qty']),
+                        ]);
+                    }
+
+                    $order->load('items');
+                    $order->complete();
                 }
 
-                $order->load('items');
-                $order->complete();
+                return $visit;
+            });
+
+            return response()->json($visit->load('orderItems.product'), 201);
+        } catch (\Throwable $e) {
+            foreach ([$doctorPhotoPath, $buildingPhotoPath] as $path) {
+                if ($path) {
+                    Storage::disk('visits')->delete($path);
+                }
             }
-
-            return $visit;
-        });
-
-        return response()->json($visit->load('orderItems.product'), 201);
+            throw $e;
+        }
     }
 
     /**
@@ -112,8 +130,7 @@ class VisitController extends Controller
         $visits = Visit::with('orderItems.product')
             ->where('employee_id', $request->user()->id)
             ->latest()
-            ->limit(50)
-            ->get();
+            ->paginate(25);
 
         return response()->json($visits);
     }
@@ -149,10 +166,10 @@ class VisitController extends Controller
             ? $visit->doctor_photo_path
             : $visit->building_photo_path;
 
-        abort_unless($path && Storage::disk('public')->exists($path), 404, 'Visit photo not found.');
+        abort_unless($path && Storage::disk('visits')->exists($path), 404, 'Visit photo not found.');
 
-        return Storage::disk('public')->response($path, null, [
-            'Cache-Control' => 'private, max-age=300',
+        return Storage::disk('visits')->response($path, null, [
+            'Cache-Control' => 'private, no-store',
         ]);
     }
 }

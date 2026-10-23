@@ -5,9 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\EmployeeWelcomeMail;
 use App\Models\User;
+use App\Support\Audit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 
 class EmployeeController extends Controller
@@ -16,7 +19,7 @@ class EmployeeController extends Controller
     {
         $employees = User::where('role', 'employee')
             ->orderBy('name')
-            ->get(['id', 'name', 'email', 'phone', 'created_at']);
+            ->get(['id', 'name', 'email', 'phone', 'is_active', 'created_at']);
 
         return response()->json($employees);
     }
@@ -46,12 +49,6 @@ class EmployeeController extends Controller
         ], 201);
     }
 
-    /**
-     * Admin triggers this when an employee forgot their password. Generates
-     * a fresh one, overwrites the stored hash, and emails it the same way
-     * as initial account creation — with the same manual-fallback if mail
-     * delivery fails.
-     */
     public function resetPassword(Request $request, User $employee)
     {
         abort_unless($employee->role === 'employee', 404);
@@ -64,34 +61,44 @@ class EmployeeController extends Controller
         ]);
     }
 
-    /**
-     * Shared by store() and resetPassword(): generates a new random
-     * password, saves it (hashed) on the user, and emails it — falling
-     * back to returning it in the response if the email fails to send.
-     */
+    public function update(Request $request, User $employee)
+    {
+        abort_unless($employee->role === 'employee', 404);
+        $data = $request->validate(['is_active' => 'required|boolean']);
+        DB::transaction(function () use ($employee, $data) {
+            $employee->update($data);
+            if (! $employee->is_active) {
+                $employee->tokens()->delete();
+            }
+            Audit::record('employee.status', $employee, $data);
+        });
+
+        return response()->json($employee);
+    }
+
     private function issueNewPassword(User $employee, bool $isReset): array
     {
-        $plainPassword = Str::password(12);
+        // Immediately invalidate prior sessions and passwords; the emailed link expires in 60 minutes.
+        $token = DB::transaction(function () use ($employee, $isReset) {
+            $employee = User::whereKey($employee->id)->lockForUpdate()->firstOrFail();
+            $employee->update(['password' => Hash::make(Str::random(64))]);
+            $employee->tokens()->delete();
+            $token = Password::createToken($employee);
+            Audit::record($isReset ? 'employee.reset' : 'employee.created', $employee);
 
-        $employee->update(['password' => Hash::make($plainPassword)]);
-
+            return $token;
+        });
+        $url = rtrim(config('services.frontend.url'), '/').'/reset-password/#'.http_build_query([
+            'token' => $token, 'email' => $employee->email,
+        ]);
         $emailSent = true;
         try {
-            Mail::to($employee->email)->send(new EmployeeWelcomeMail($employee, $plainPassword, $isReset));
+            Mail::to($employee->email)->send(new EmployeeWelcomeMail($employee, $url, $isReset));
         } catch (\Throwable $e) {
-            // Don't fail the request just because mail delivery failed
-            // (e.g. SMTP not configured yet) — surface it to the admin
-            // instead so they can share the password manually.
             $emailSent = false;
             report($e);
         }
 
-        return [
-            'email_sent' => $emailSent,
-            // Only returned so the admin can share it manually if the email
-            // failed to send — the frontend should only display this when
-            // email_sent is false.
-            'temporary_password' => $emailSent ? null : $plainPassword,
-        ];
+        return ['email_sent' => $emailSent, 'setup_url' => $emailSent ? null : $url];
     }
 }

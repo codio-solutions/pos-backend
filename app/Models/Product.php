@@ -29,6 +29,6 @@ class Product extends Model
      */
     public function currentStock(): int
     {
-        return (int) $this->stockMovements()->sum('quantity');
+        return (int) $this->stockMovements()->selectRaw("COALESCE(SUM(quantity + CASE WHEN type = 'purchase' THEN bonus_qty ELSE 0 END), 0) as total")->lockForUpdate()->value('total');
     }
 }

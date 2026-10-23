@@ -1,0 +1,16 @@
+name: Backend checks
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_sqlite
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer audit --locked
+      - run: php vendor/bin/phpunit --do-not-cache-result
+        env:
+          APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

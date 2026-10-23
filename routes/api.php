@@ -18,9 +18,10 @@ use Illuminate\Support\Facades\Route;
 | this file requires that token, except the website webhook below.
 */
 
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+Route::post('/password/reset', [AuthController::class, 'resetPassword'])->middleware('throttle:6,1');
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'active', 'idempotent'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
 
@@ -35,6 +36,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // employee for the visit form's product picker. Only the admin group
     // below can create/edit/delete products.
     Route::get('/products', [ProductController::class, 'index']);
+    Route::get('/products/{product}', [ProductController::class, 'show']);
 
     // Visits — employee submits from the field; admin monitors everyone's.
     Route::post('/visits', [VisitController::class, 'store']);
@@ -48,6 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Products (write)
         Route::post('/products', [ProductController::class, 'store']);
         Route::put('/products/{product}', [ProductController::class, 'update']);
+        Route::patch('/products/{product}', [ProductController::class, 'update']);
         Route::delete('/products/{product}', [ProductController::class, 'destroy']);
 
         // Purchasing
@@ -58,6 +61,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Selling (POS checkout) + sale returns
         Route::get('/orders', [OrderController::class, 'index']);
         Route::post('/orders', [OrderController::class, 'store']);
+        Route::post('/orders/{order}/reconcile', [OrderController::class, 'reconcile']);
         Route::post('/sale-returns', [OrderController::class, 'storeReturn']);
 
         // Reports
@@ -71,6 +75,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/employees', [EmployeeController::class, 'index']);
         Route::post('/employees', [EmployeeController::class, 'store']);
         Route::post('/employees/{employee}/reset-password', [EmployeeController::class, 'resetPassword']);
+        Route::patch('/employees/{employee}', [EmployeeController::class, 'update']);
 
         // Visits — admin monitoring view (Visits / Submitted Data pages)
         Route::get('/visits', [VisitController::class, 'index']);

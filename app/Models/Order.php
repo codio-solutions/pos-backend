@@ -9,7 +9,9 @@ use Illuminate\Support\Facades\DB;
 
 class Order extends Model
 {
-    protected $fillable = ['source', 'external_ref', 'status', 'created_by', 'notes'];
+    protected $fillable = ['source', 'external_ref', 'status', 'created_by', 'notes', 'webhook_payload'];
+
+    protected $casts = ['webhook_payload' => 'array'];
 
     public function items(): HasMany
     {
@@ -30,11 +32,16 @@ class Order extends Model
      */
     public function complete(): void
     {
-        if ($this->status === 'completed') {
-            return; // idempotent — a retried webhook won't double-decrement stock
-        }
-
         DB::transaction(function () {
+            $locked = self::whereKey($this->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status === 'completed') {
+                return;
+            }
+            abort_unless($locked->status === 'pending', 422, 'Only pending orders can be completed.');
+            $this->load('items');
+            // Always acquire product locks in the same order across multi-line orders.
+            $products = Product::whereIn('id', $this->items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get();
+            abort_if($products->contains(fn ($p) => ! $p->is_active), 422, 'An order product is inactive.');
             foreach ($this->items as $item) {
                 StockMovement::record([
                     'product_id' => $item->product_id,

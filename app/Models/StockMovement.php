@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Facades\DB;
 
 class StockMovement extends Model
 {
@@ -35,19 +36,26 @@ class StockMovement extends Model
      */
     public static function record(array $data): self
     {
-        $incoming = in_array($data['type'], ['purchase', 'sale_return']);
-        $qty = abs($data['quantity']);
+        return DB::transaction(function () use ($data) {
+            $product = Product::whereKey($data['product_id'])->lockForUpdate()->firstOrFail();
+            $incoming = in_array($data['type'], ['purchase', 'sale_return']);
+            $qty = (int) $data['quantity'];
+            abort_unless($qty > 0, 422, 'Quantity must be a positive integer.');
+            if (! $incoming) {
+                abort_if($product->currentStock() < $qty, 422, 'Insufficient stock for '.$product->name.'.');
+            }
 
-        return self::create([
-            'product_id' => $data['product_id'],
-            'type' => $data['type'],
-            'quantity' => $incoming ? $qty : -$qty,
-            'bonus_qty' => $data['bonus_qty'] ?? 0,
-            'value' => $data['value'] ?? 0,
-            'source' => $data['source'] ?? 'manual',
-            'reference_type' => $data['reference_type'] ?? null,
-            'reference_id' => $data['reference_id'] ?? null,
-            'created_by' => $data['created_by'] ?? null,
-        ]);
+            return self::create([
+                'product_id' => $data['product_id'],
+                'type' => $data['type'],
+                'quantity' => $incoming ? $qty : -$qty,
+                'bonus_qty' => $data['bonus_qty'] ?? 0,
+                'value' => $data['value'] ?? 0,
+                'source' => ($data['source'] ?? 'manual') === 'pos' ? 'manual' : ($data['source'] ?? 'manual'),
+                'reference_type' => $data['reference_type'] ?? null,
+                'reference_id' => $data['reference_id'] ?? null,
+                'created_by' => $data['created_by'] ?? null,
+            ]);
+        });
     }
 }

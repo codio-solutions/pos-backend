@@ -5,7 +5,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Support\Facades\Storage;
 
 class Visit extends Model
 {
@@ -29,11 +28,11 @@ class Visit extends Model
 
     public function getDoctorPhotoUrlAttribute(): ?string
     {
-        return $this->doctor_photo_path ? Storage::disk('public')->url($this->doctor_photo_path) : null;
+        return $this->doctor_photo_path ? url('/api/visits/'.$this->id.'/photos/doctor') : null;
     }
 
     public function getBuildingPhotoUrlAttribute(): ?string
     {
-        return $this->building_photo_path ? Storage::disk('public')->url($this->building_photo_path) : null;
+        return $this->building_photo_path ? url('/api/visits/'.$this->id.'/photos/building') : null;
     }
 }

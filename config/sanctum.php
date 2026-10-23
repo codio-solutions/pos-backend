@@ -50,7 +50,7 @@ return [
     |
     */
 
-    'expiration' => null,
+    'expiration' => (int) env('TOKEN_EXPIRATION_MINUTES', 480),
 
     /*
     |--------------------------------------------------------------------------

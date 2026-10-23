@@ -13,24 +13,24 @@ class EmployeeWelcomeMail extends Mailable
 
     public function __construct(
         public User $user,
-        public string $plainPassword,
+        public string $setupUrl,
         public bool $isReset = false
     ) {}
 
     public function build()
     {
         return $this->subject(
-                $this->isReset
-                    ? 'Your Khan Enterprises portal password was reset'
-                    : 'Your Khan Enterprises portal login'
-            )
+            $this->isReset
+                ? 'Your Khan Enterprises portal password was reset'
+                : 'Your Khan Enterprises portal login'
+        )
             ->view('emails.employee-welcome')
             ->with([
-                'name' => $this->user->name,
-                'email' => $this->user->email,
-                'password' => $this->plainPassword,
-                'loginUrl' => rtrim(config('services.frontend.url'), '/') . '/login',
-                'isReset' => $this->isReset,
-            ]);
+            'name' => $this->user->name,
+            'email' => $this->user->email,
+            'setupUrl' => $this->setupUrl,
+            'loginUrl' => rtrim(config('services.frontend.url'), '/').'/login',
+            'isReset' => $this->isReset,
+        ]);
     }
 }

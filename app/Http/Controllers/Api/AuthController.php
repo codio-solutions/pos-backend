@@ -4,8 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\Audit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -19,7 +22,7 @@ class AuthController extends Controller
 
         $user = User::where('email', $data['email'])->first();
 
-        if (!$user || !Hash::check($data['password'], $user->password)) {
+        if (! $user || ! $user->is_active || ! Hash::check($data['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['These credentials do not match our records.'],
             ]);
@@ -38,6 +41,29 @@ class AuthController extends Controller
                 'role' => $user->role,
             ],
         ]);
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $data = $request->validate([
+            'email' => 'required|email', 'token' => 'required|string',
+            'password' => ['required', 'confirmed', Password::min(12)->letters()->numbers()],
+        ]);
+        $status = DB::transaction(function () use ($data) {
+            User::where('email', $data['email'])->lockForUpdate()->first();
+
+            return \Illuminate\Support\Facades\Password::reset($data, function ($user, $password) {
+                abort_unless($user->is_active, 403, 'This account is suspended.');
+                DB::transaction(function () use ($user, $password) {
+                    $user->update(['password' => Hash::make($password)]);
+                    $user->tokens()->delete();
+                    Audit::record('password.set', $user);
+                });
+            });
+        });
+        abort_unless($status === \Illuminate\Support\Facades\Password::PASSWORD_RESET, 422, __($status));
+
+        return response()->json(['message' => 'Password saved. You can sign in now.']);
     }
 
     public function logout(Request $request)

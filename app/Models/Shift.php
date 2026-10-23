@@ -26,10 +26,10 @@ class Shift extends Model
 
     public function getDurationSecondsAttribute(): ?int
     {
-        if (!$this->check_out_at) {
+        if (! $this->check_out_at) {
             return null; // still open — frontend computes live duration client-side
         }
 
-        return (int) abs($this->check_in_at->diffInSeconds($this->check_out_at));
+        return (int) max(0, $this->check_in_at->diffInSeconds($this->check_out_at));
     }
 }
