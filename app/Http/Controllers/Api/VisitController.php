@@ -39,6 +39,8 @@ class VisitController extends Controller
             'doctor_email' => 'nullable|email|max:255',
             'clinic_address' => 'required|string|max:2000',
             'notes' => 'nullable|string|max:10000',
+            'travel_expense' => 'nullable|numeric|min:0|max:9999999999.99|decimal:0,2',
+            'other_expense' => 'nullable|numeric|min:0|max:9999999999.99|decimal:0,2',
             'lat' => 'required|numeric|between:-90,90',
             'lng' => 'required|numeric|between:-180,180',
             'items' => 'nullable|string|max:50000', // JSON-encoded array, decoded below
@@ -73,6 +75,8 @@ class VisitController extends Controller
                     'doctor_email' => $data['doctor_email'] ?? null,
                     'clinic_address' => $data['clinic_address'],
                     'notes' => $data['notes'] ?? null,
+                    'travel_expense' => $data['travel_expense'] ?? 0,
+                    'other_expense' => $data['other_expense'] ?? 0,
                     'lat' => $data['lat'] ?? null,
                     'lng' => $data['lng'] ?? null,
                     'doctor_photo_path' => $doctorPhotoPath,

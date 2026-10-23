@@ -11,10 +11,15 @@ class Visit extends Model
     protected $fillable = [
         'employee_id', 'doctor_name', 'clinic_name', 'doctor_phone',
         'doctor_email', 'clinic_address', 'notes', 'lat', 'lng',
-        'doctor_photo_path', 'building_photo_path',
+        'travel_expense', 'other_expense', 'doctor_photo_path', 'building_photo_path',
     ];
 
     protected $appends = ['doctor_photo_url', 'building_photo_url'];
+
+    protected $casts = [
+        'travel_expense' => 'decimal:2',
+        'other_expense' => 'decimal:2',
+    ];
 
     public function employee(): BelongsTo
     {

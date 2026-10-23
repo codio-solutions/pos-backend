@@ -78,8 +78,34 @@ class IntegrityTest extends TestCase
             $this->createJson('/visits', $this->visit(['items' => $items]))->assertStatus(422);
         }
         $this->createJson('/visits', $this->visit(['lat' => 95]))->assertStatus(422);
+        $this->createJson('/visits', $this->visit(['travel_expense' => '-1']))->assertStatus(422);
         $this->assertDatabaseCount('visits', 0);
         $this->assertSame([], Storage::disk('visits')->allFiles());
+    }
+
+    public function test_visit_expenses_are_saved_and_visible_to_admin(): void
+    {
+        Storage::fake('visits');
+        $this->loginAs('employee');
+
+        $visit = $this->createJson('/visits', $this->visit([
+            'travel_expense' => '125.50',
+            'other_expense' => '35.25',
+        ]))->assertCreated()
+            ->assertJsonPath('travel_expense', '125.50')
+            ->assertJsonPath('other_expense', '35.25');
+
+        $this->assertDatabaseHas('visits', [
+            'id' => $visit->json('id'),
+            'travel_expense' => '125.50',
+            'other_expense' => '35.25',
+        ]);
+
+        $this->loginAs();
+        $this->getJson('/api/visits')
+            ->assertOk()
+            ->assertJsonPath('data.0.travel_expense', '125.50')
+            ->assertJsonPath('data.0.other_expense', '35.25');
     }
 
     public function test_phone_and_order_are_optional_and_photos_are_private(): void

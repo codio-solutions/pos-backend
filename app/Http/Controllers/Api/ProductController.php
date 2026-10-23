@@ -4,18 +4,22 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Models\Purchase;
 use App\Models\StockMovement;
 use App\Support\Audit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Str;
 
 class ProductController extends Controller
 {
     public function index(Request $request)
     {
         $products = Product::query()
-            ->when($request->boolean('active'), fn ($q) => $q->where('is_active', true))
+            ->when($request->input('status') === 'active', fn ($q) => $q->where('is_active', true))
+            ->when($request->input('status') === 'inactive', fn ($q) => $q->where('is_active', false))
+            ->when(! $request->has('status') && $request->boolean('active'), fn ($q) => $q->where('is_active', true))
             ->when($request->search, fn ($q, $s) => $q->where(fn ($nested) => $nested->where('name', 'like', "%{$s}%")->orWhere('sku', 'like', "%{$s}%")))
             ->orderBy('name')
             ->paginate(25);
@@ -39,15 +43,70 @@ class ProductController extends Controller
     {
         $data = $request->validate([
             'name' => 'required|string|max:255',
-            'sku' => 'required|string|max:100|unique:products,sku',
             'tax_rate' => 'nullable|numeric|min:0|max:1',
             'trade_price' => 'required|numeric|min:0|max:9999999999.99|decimal:0,2',
             'unit' => 'nullable|string|max:50',
+            'initial_stock_qty' => 'sometimes|integer|min:0|max:1000000',
+            'initial_stock_value' => 'required_with:initial_stock_qty|numeric|min:0|max:9999999999.99|decimal:0,2',
         ]);
 
-        $product = Product::create($data);
+        $data['initial_stock_qty'] = $data['initial_stock_qty'] ?? 0;
+        $data['initial_stock_value'] = $data['initial_stock_value'] ?? 0;
+
+        abort_if(
+            (int) $data['initial_stock_qty'] === 0 && (float) $data['initial_stock_value'] > 0,
+            422,
+            'Initial stock cost must be 0 when initial stock quantity is 0.'
+        );
+
+        $product = DB::transaction(function () use ($data, $request) {
+            $product = Product::create([
+                'name' => $data['name'],
+                'sku' => $this->generateSku($data['name']),
+                'tax_rate' => $data['tax_rate'] ?? 0,
+                'trade_price' => $data['trade_price'],
+                'unit' => $data['unit'] ?? 'pcs',
+            ]);
+
+            Audit::record('product.created', $product);
+
+            if ($data['initial_stock_qty'] > 0) {
+                $purchase = Purchase::create([
+                    'product_id' => $product->id,
+                    'qty' => $data['initial_stock_qty'],
+                    'bonus_qty' => 0,
+                    'value' => $data['initial_stock_value'],
+                    'supplier' => 'Opening stock',
+                    'created_by' => $request->user()->id,
+                ]);
+                Audit::record('purchase.created', $purchase, [
+                    'opening_stock' => true,
+                    'qty' => $data['initial_stock_qty'],
+                    'value' => $data['initial_stock_value'],
+                ]);
+            }
+
+            return $product;
+        });
+
+        $product->current_stock = $product->currentStock();
 
         return response()->json($product, 201);
+    }
+
+    private function generateSku(string $name): string
+    {
+        $base = Str::upper(Str::slug($name));
+        $base = $base !== '' ? Str::limit($base, 90, '') : 'PRODUCT';
+        $sku = $base;
+        $suffix = 2;
+
+        while (Product::where('sku', $sku)->exists()) {
+            $sku = Str::limit($base, 90 - strlen((string) $suffix), '').'-'.$suffix;
+            $suffix++;
+        }
+
+        return $sku;
     }
 
     public function show(Product $product)
