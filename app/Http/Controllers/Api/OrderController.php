@@ -151,6 +151,43 @@ class OrderController extends Controller
         return response()->json($order->fresh()->load('items.product'));
     }
 
+    public function updateStatus(Request $request, Order $order)
+    {
+        abort_unless($order->source === 'visit', 422, 'Only field-visit orders use this workflow.');
+
+        $data = $request->validate([
+            'status' => ['required', Rule::in(['processing', 'delivered', 'completed', 'cancelled'])],
+        ]);
+
+        DB::transaction(function () use ($order, $data) {
+            $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $transitions = [
+                'pending' => ['processing', 'cancelled'],
+                'processing' => ['delivered', 'completed', 'cancelled'],
+                'delivered' => ['completed'],
+                'completed' => [],
+                'cancelled' => [],
+            ];
+            $nextStatus = $data['status'];
+
+            abort_unless(
+                in_array($nextStatus, $transitions[$locked->status] ?? [], true),
+                422,
+                'This status change is not allowed.'
+            );
+
+            if ($nextStatus === 'completed') {
+                $locked->complete();
+            } else {
+                $locked->update(['status' => $nextStatus]);
+            }
+
+            Audit::record('order.status', $locked, ['status' => $nextStatus]);
+        });
+
+        return response()->json($order->fresh()->load('items.product', 'creator'));
+    }
+
     private function reconcileOrder(Order $order): void
     {
         $order = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();

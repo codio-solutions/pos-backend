@@ -24,6 +24,10 @@ class ProductController extends Controller
             ->orderBy('name')
             ->paginate(25);
 
+        if (! $request->boolean('with_stock', true)) {
+            return response()->json($products);
+        }
+
         // attach current stock without N+1: sum stock_movements grouped by product_id in one query
         $stockByProduct = StockMovement::whereIn('product_id', $products->pluck('id'))
             ->selectRaw("product_id, SUM(quantity + CASE WHEN type = 'purchase' THEN bonus_qty ELSE 0 END) as qty")

@@ -37,7 +37,11 @@ class Order extends Model
             if ($locked->status === 'completed') {
                 return;
             }
-            abort_unless($locked->status === 'pending', 422, 'Only pending orders can be completed.');
+            abort_unless(
+                in_array($locked->status, ['pending', 'processing', 'delivered'], true),
+                422,
+                'This order cannot be completed from its current status.'
+            );
             $this->load('items');
             // Always acquire product locks in the same order across multi-line orders.
             $products = Product::whereIn('id', $this->items->pluck('product_id'))->orderBy('id')->lockForUpdate()->get();

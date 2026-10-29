@@ -26,9 +26,7 @@ class VisitController extends Controller
      * Doctor/clinic fields are always required; `items` is optional —
      * omit it (or send "[]") for a visit with no order. When items are
      * present, this creates a matching `orders` row (source: visit)
-     * through the same Order::complete() pipeline the website webhook
-     * and POS checkout use, so stock decrements the same way regardless
-     * of where the sale came from.
+    * as a pending field order for administrator confirmation.
      */
     public function store(Request $request)
     {
@@ -67,6 +65,25 @@ class VisitController extends Controller
             $buildingPhotoPath = $request->file('building_photo')->store('visits', 'visits');
 
             $visit = DB::transaction(function () use ($data, $items, $doctorPhotoPath, $buildingPhotoPath, $request) {
+                $products = collect();
+                if (! empty($items)) {
+                    $products = Product::whereIn('id', collect($items)->pluck('product_id')->unique())
+                        ->orderBy('id')
+                        ->lockForUpdate()
+                        ->get()
+                        ->keyBy('id');
+
+                    foreach (collect($items)->groupBy('product_id') as $productId => $productItems) {
+                        $product = $products->get($productId);
+                        abort_unless($product && $product->is_active, 422, 'An order product is inactive.');
+                        abort_if(
+                            $product->currentStock() < $productItems->sum('qty'),
+                            422,
+                            'Insufficient stock for '.$product->name.'.'
+                        );
+                    }
+                }
+
                 $visit = Visit::create([
                     'employee_id' => $request->user()->id,
                     'doctor_name' => $data['doctor_name'],
@@ -91,7 +108,7 @@ class VisitController extends Controller
                     ]);
 
                     foreach ($items as $item) {
-                        $product = Product::findOrFail($item['product_id']);
+                        $product = $products->get($item['product_id']);
 
                         VisitOrderItem::create([
                             'visit_id' => $visit->id,
@@ -108,8 +125,6 @@ class VisitController extends Controller
                         ]);
                     }
 
-                    $order->load('items');
-                    $order->complete();
                 }
 
                 return $visit;

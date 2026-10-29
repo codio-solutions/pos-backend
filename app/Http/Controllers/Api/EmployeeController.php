@@ -15,11 +15,15 @@ use Illuminate\Support\Str;
 
 class EmployeeController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
         $employees = User::where('role', 'employee')
+            ->when($request->search, fn ($query, $search) => $query->where(function ($nested) use ($search) {
+                $nested->where('name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%");
+            }))
             ->orderBy('name')
-            ->get(['id', 'name', 'email', 'phone', 'is_active', 'created_at']);
+            ->paginate(25, ['id', 'name', 'email', 'phone', 'is_active', 'created_at']);
 
         return response()->json($employees);
     }
@@ -91,14 +95,16 @@ class EmployeeController extends Controller
         $url = rtrim(config('services.frontend.url'), '/').'/reset-password/#'.http_build_query([
             'token' => $token, 'email' => $employee->email,
         ]);
-        $emailSent = true;
+        $emailQueued = true;
         try {
-            Mail::to($employee->email)->send(new EmployeeWelcomeMail($employee, $url, $isReset));
+            Mail::to($employee->email)->queue(
+                (new EmployeeWelcomeMail($employee, $url, $isReset))->onConnection('database')
+            );
         } catch (\Throwable $e) {
-            $emailSent = false;
+            $emailQueued = false;
             report($e);
         }
 
-        return ['email_sent' => $emailSent, 'setup_url' => $emailSent ? null : $url];
+        return ['email_queued' => $emailQueued, 'setup_url' => $emailQueued ? null : $url];
     }
 }

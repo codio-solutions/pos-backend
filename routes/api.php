@@ -61,6 +61,7 @@ Route::middleware(['auth:sanctum', 'active', 'idempotent'])->group(function () {
         // Selling (POS checkout) + sale returns
         Route::get('/orders', [OrderController::class, 'index']);
         Route::post('/orders', [OrderController::class, 'store']);
+        Route::patch('/orders/{order}/status', [OrderController::class, 'updateStatus']);
         Route::post('/orders/{order}/reconcile', [OrderController::class, 'reconcile']);
         Route::post('/sale-returns', [OrderController::class, 'storeReturn']);
 

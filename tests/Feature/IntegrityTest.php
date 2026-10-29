@@ -132,6 +132,35 @@ class IntegrityTest extends TestCase
         $this->assertDatabaseCount('visits', 0);
     }
 
+    public function test_visit_order_waits_for_admin_completion_before_decrementing_stock(): void
+    {
+        Storage::fake('visits');
+        $product = $this->product(10);
+        $this->loginAs('employee');
+
+        $this->createJson('/visits', $this->visit([
+            'items' => json_encode([['product_id' => $product->id, 'qty' => 2]]),
+        ]))->assertCreated();
+        $order = Order::where('source', 'visit')->firstOrFail();
+
+        $this->assertSame('pending', $order->status);
+        $this->assertSame(10, $product->fresh()->currentStock());
+
+        $this->loginAs();
+        $this->patchJson('/api/orders/'.$order->id.'/status', ['status' => 'processing'])
+            ->assertOk()
+            ->assertJsonPath('status', 'processing');
+        $this->patchJson('/api/orders/'.$order->id.'/status', ['status' => 'delivered'])
+            ->assertOk()
+            ->assertJsonPath('status', 'delivered');
+        $this->assertSame(10, $product->fresh()->currentStock());
+
+        $this->patchJson('/api/orders/'.$order->id.'/status', ['status' => 'completed'])
+            ->assertOk()
+            ->assertJsonPath('status', 'completed');
+        $this->assertSame(8, $product->fresh()->currentStock());
+    }
+
     public function test_bonus_stock_overselling_inactive_products_and_idempotency(): void
     {
         $this->loginAs();
