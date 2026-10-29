@@ -19,7 +19,7 @@ class OrderController extends Controller
     public function index(Request $request)
     {
         // unified Orders page — filterable by source: pos | website | visit
-        $orders = Order::with('items.product', 'creator')
+        $orders = Order::with('items.product', 'creator', 'visit.employee')
             ->when($request->integer('order_id'), fn ($q, $id) => $q->whereKey($id))
             ->when($request->source, fn ($q, $s) => $q->where('source', $s))
             ->when($request->status, fn ($q, $s) => $q->where('status', $s))
@@ -186,7 +186,7 @@ class OrderController extends Controller
             Audit::record('order.status', $locked, ['status' => $nextStatus]);
         });
 
-        return response()->json($order->fresh()->load('items.product', 'creator'));
+        return response()->json($order->fresh()->load('items.product', 'creator', 'visit.employee'));
     }
 
     private function reconcileOrder(Order $order): void

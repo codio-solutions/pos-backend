@@ -139,6 +139,8 @@ class IntegrityTest extends TestCase
         $this->loginAs('employee');
 
         $visitResponse = $this->createJson('/visits', $this->visit([
+            'doctor_phone' => '555-0123',
+            'clinic_address' => 'Main Street 12',
             'items' => json_encode([['product_id' => $product->id, 'qty' => 2]]),
         ]))->assertCreated();
         $order = Order::where('source', 'visit')->firstOrFail();
@@ -151,6 +153,8 @@ class IntegrityTest extends TestCase
         $this->getJson('/api/orders?order_id='.$order->id)
             ->assertOk()
             ->assertJsonPath('data.0.id', $order->id)
+            ->assertJsonPath('data.0.visit.doctor_phone', '555-0123')
+            ->assertJsonPath('data.0.visit.clinic_address', 'Main Street 12')
             ->assertJsonPath('data.0.items.0.product.name', $product->name);
         $this->patchJson('/api/orders/'.$order->id.'/status', ['status' => 'processing'])
             ->assertOk()

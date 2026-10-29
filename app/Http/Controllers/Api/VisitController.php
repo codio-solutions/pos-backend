@@ -131,7 +131,7 @@ class VisitController extends Controller
                 return $visit;
             });
 
-            return response()->json($visit->load('orderItems.product', 'order:id,status,source'), 201);
+            return response()->json($visit->load('orderItems.product', 'order.items.product'), 201);
         } catch (\Throwable $e) {
             foreach ([$doctorPhotoPath, $buildingPhotoPath] as $path) {
                 if ($path) {
@@ -147,7 +147,7 @@ class VisitController extends Controller
      */
     public function mine(Request $request)
     {
-        $visits = Visit::with('orderItems.product', 'order:id,status,source')
+        $visits = Visit::with('orderItems.product', 'order.items.product')
             ->where('employee_id', $request->user()->id)
             ->latest()
             ->paginate(25);
@@ -162,7 +162,7 @@ class VisitController extends Controller
      */
     public function index(Request $request)
     {
-        $visits = Visit::with('employee:id,name', 'orderItems.product', 'order:id,status,source')
+        $visits = Visit::with('employee:id,name', 'orderItems.product', 'order.items.product')
             ->when($request->employee_id, fn ($q, $id) => $q->where('employee_id', $id))
             ->when($request->doctor, fn ($q, $d) => $q->where('doctor_name', 'like', "%{$d}%"))
             ->when($request->from, fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
