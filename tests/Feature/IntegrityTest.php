@@ -138,15 +138,20 @@ class IntegrityTest extends TestCase
         $product = $this->product(10);
         $this->loginAs('employee');
 
-        $this->createJson('/visits', $this->visit([
+        $visitResponse = $this->createJson('/visits', $this->visit([
             'items' => json_encode([['product_id' => $product->id, 'qty' => 2]]),
         ]))->assertCreated();
         $order = Order::where('source', 'visit')->firstOrFail();
 
+        $this->assertSame($order->id, $visitResponse->json('order.id'));
         $this->assertSame('pending', $order->status);
         $this->assertSame(10, $product->fresh()->currentStock());
 
         $this->loginAs();
+        $this->getJson('/api/orders?order_id='.$order->id)
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $order->id)
+            ->assertJsonPath('data.0.items.0.product.name', $product->name);
         $this->patchJson('/api/orders/'.$order->id.'/status', ['status' => 'processing'])
             ->assertOk()
             ->assertJsonPath('status', 'processing');

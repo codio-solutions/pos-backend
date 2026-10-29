@@ -11,7 +11,7 @@ class Visit extends Model
     protected $fillable = [
         'employee_id', 'doctor_name', 'clinic_name', 'doctor_phone',
         'doctor_email', 'clinic_address', 'notes', 'lat', 'lng',
-        'travel_expense', 'other_expense', 'doctor_photo_path', 'building_photo_path',
+        'travel_expense', 'other_expense', 'doctor_photo_path', 'building_photo_path', 'order_id',
     ];
 
     protected $appends = ['doctor_photo_url', 'building_photo_url'];
@@ -24,6 +24,11 @@ class Visit extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(User::class, 'employee_id');
+    }
+
+    public function order(): BelongsTo
+    {
+        return $this->belongsTo(Order::class);
     }
 
     public function orderItems(): HasMany

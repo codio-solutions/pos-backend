@@ -20,6 +20,7 @@ class OrderController extends Controller
     {
         // unified Orders page — filterable by source: pos | website | visit
         $orders = Order::with('items.product', 'creator')
+            ->when($request->integer('order_id'), fn ($q, $id) => $q->whereKey($id))
             ->when($request->source, fn ($q, $s) => $q->where('source', $s))
             ->when($request->status, fn ($q, $s) => $q->where('status', $s))
             ->when($request->from, fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
